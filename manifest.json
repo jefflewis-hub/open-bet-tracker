@@ -1,0 +1,14 @@
+{
+  "name": "Circle & Square — Bet Tracker",
+  "short_name": "Circle & Square",
+  "description": "Live golf bet tracker for any tournament",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#10160F",
+  "theme_color": "#10160F",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

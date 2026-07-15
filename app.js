@@ -1,0 +1,657 @@
+(() => {
+  "use strict";
+
+  const STORAGE_KEY = "circleSquare.v1";
+  const REFRESH_MS = 45000;
+  const ESPN_LEADERBOARD = "https://site.api.espn.com/apis/site/v2/sports/golf/leaderboard";
+  const ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard";
+
+  const BET_TYPE_LABELS = {
+    outright: "Outright winner",
+    top5: "Top 5",
+    top10: "Top 10",
+    top20: "Top 20",
+    top30: "Top 30",
+    makecut: "Makes the cut",
+    h2h: "Head-to-head",
+    custom: "Prop",
+  };
+
+  /* ---------- state ---------- */
+  let state = loadState();
+  let leaderboards = {}; // eventId -> { tournament, competitors: Map(id->comp), eventState, roundDetail }
+  let activeTournamentId = state.tournaments[0] ? state.tournaments[0].id : null;
+  let currentView = "bets";
+  let pollTimer = null;
+  let lastUpdated = null;
+  let pendingRemove = null; // {type:'bet'|'tournament', id}
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { tournaments: [], bets: [] };
+  }
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  /* ---------- ESPN data ---------- */
+  async function fetchThisWeek() {
+    const res = await fetch(ESPN_SCOREBOARD);
+    if (!res.ok) throw new Error("scoreboard fetch failed");
+    const data = await res.json();
+    return (data.events || []).map((e) => ({
+      id: e.id,
+      name: e.name,
+      date: e.date,
+      state: e.status && e.status.type && e.status.type.state,
+    }));
+  }
+
+  function parseCompetitor(c) {
+    const disp = (c.status && c.status.position && c.status.position.displayName) || "-";
+    const typeName = (c.status && c.status.type && c.status.type.name) || "";
+    const isCut = /CUT/i.test(typeName) || disp.toUpperCase() === "CUT";
+    const isWD = /WITHDR/i.test(typeName);
+    const isDQ = /DISQ/i.test(typeName);
+    const numMatch = disp.match(/(\d+)/);
+    const posNum = numMatch ? parseInt(numMatch[1], 10) : null;
+    const scoreToParStat = ((c.statistics || []).find((s) => s.name === "scoreToPar")) || null;
+    const scoreToPar = scoreToParStat && typeof scoreToParStat.value === "number" ? scoreToParStat.value : null;
+    return {
+      id: c.athlete ? c.athlete.id : c.id,
+      name: c.athlete ? c.athlete.displayName : "Unknown",
+      posDisplay: disp,
+      posNum,
+      isCut,
+      isWD,
+      isDQ,
+      scoreToPar,
+      scoreDisplay: (c.score && c.score.displayValue) || "-",
+      thru: c.status ? c.status.thru : null,
+      teeTime: c.status ? c.status.teeTime : null,
+    };
+  }
+
+  async function fetchLeaderboard(eventId) {
+    const res = await fetch(`${ESPN_LEADERBOARD}?event=${encodeURIComponent(eventId)}`);
+    if (!res.ok) throw new Error("leaderboard fetch failed");
+    const data = await res.json();
+    const ev = data.events && data.events[0];
+    if (!ev) throw new Error("event not found");
+    const comp = ev.competitions && ev.competitions[0];
+    const competitors = (comp ? comp.competitors : []).map(parseCompetitor);
+    const byId = new Map(competitors.map((c) => [String(c.id), c]));
+    const status = ev.status && ev.status.type;
+    return {
+      id: ev.id,
+      name: ev.name,
+      eventState: status ? status.state : "pre", // pre | in | post
+      stateDetail: status ? status.shortDetail || status.detail || status.description : "",
+      competitors,
+      byId,
+    };
+  }
+
+  async function refreshAll() {
+    const ids = state.tournaments.map((t) => t.id);
+    if (ids.length === 0) {
+      lastUpdated = new Date();
+      render();
+      return;
+    }
+    setLive(true);
+    const results = await Promise.allSettled(ids.map((id) => fetchLeaderboard(id)));
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        leaderboards[ids[i]] = r.value;
+      }
+    });
+    lastUpdated = new Date();
+    setLive(false);
+    render();
+  }
+
+  function setLive(isFetching) {
+    const el = document.getElementById("refreshBtn");
+    if (isFetching) el.classList.add("is-live");
+    else el.classList.remove("is-live");
+  }
+
+  /* ---------- grading ---------- */
+  function americanPayout(oddsStr, stake) {
+    const s = parseFloat(stake);
+    const m = String(oddsStr).trim().match(/^([+-]?)(\d+(\.\d+)?)$/);
+    if (!m || isNaN(s)) return null;
+    const sign = m[1] === "-" ? -1 : 1;
+    const val = parseFloat(m[2]) * sign;
+    if (val === 0) return null;
+    const profit = val > 0 ? s * (val / 100) : s * (100 / Math.abs(val));
+    return { profit, toReturn: s + profit };
+  }
+
+  function evaluateBet(bet, lb) {
+    // returns { mark: 'circle'|'square'|'diamond'|'dash', filled:bool, state:'good'|'bad'|'pending'|'neutral', label:string, posText, toParText }
+    if (!lb) return { mark: "dash", filled: false, state: "neutral", label: "No data", posText: "—", toParText: "" };
+
+    const golfer = lb.byId.get(String(bet.golferId));
+    const final = lb.eventState === "post";
+
+    if (bet.type === "custom") {
+      if (!golfer) return { mark: "dash", filled: false, state: "neutral", label: "—", posText: "—", toParText: "" };
+      return {
+        mark: "dash",
+        filled: false,
+        state: "neutral",
+        label: golfer.isCut ? "Missed cut" : golfer.isWD ? "Withdrew" : "",
+        posText: golfer.isCut || golfer.isWD ? golfer.posDisplay : golfer.posDisplay,
+        toParText: golfer.scoreDisplay,
+      };
+    }
+
+    if (bet.type === "h2h") {
+      const opp = lb.byId.get(String(bet.opponentId));
+      if (!golfer || !opp) return { mark: "dash", filled: false, state: "neutral", label: "No data", posText: "—", toParText: "" };
+      const mineOut = golfer.isCut || golfer.isWD || golfer.isDQ;
+      const oppOut = opp.isCut || opp.isWD || opp.isDQ;
+      let satisfied = null;
+      if (mineOut && oppOut) satisfied = null; // push / check rules
+      else if (mineOut) satisfied = false;
+      else if (oppOut) satisfied = true;
+      else if (golfer.scoreToPar !== null && opp.scoreToPar !== null) satisfied = golfer.scoreToPar < opp.scoreToPar;
+      else satisfied = null;
+
+      let label = `vs ${opp.name}`;
+      if (mineOut && oppOut) label = "Both out — check push rule";
+      const mark = satisfied === null ? "diamond" : satisfied ? "circle" : "square";
+      const st = satisfied === null ? "pending" : satisfied ? "good" : "bad";
+      return {
+        mark,
+        filled: final && satisfied !== null,
+        state: st,
+        label: final ? (satisfied === null ? label : satisfied ? "Won matchup" : "Lost matchup") : label,
+        posText: golfer.posDisplay,
+        toParText: golfer.scoreDisplay,
+      };
+    }
+
+    if (!golfer) return { mark: "dash", filled: false, state: "neutral", label: "No data", posText: "—", toParText: "" };
+
+    if (golfer.isWD || golfer.isDQ) {
+      return {
+        mark: "diamond",
+        filled: false,
+        state: "pending",
+        label: golfer.isDQ ? "Disqualified — check push rule" : "Withdrew — check push rule",
+        posText: golfer.posDisplay,
+        toParText: golfer.scoreDisplay,
+      };
+    }
+
+    if (bet.type === "makecut") {
+      if (golfer.isCut) {
+        return { mark: "square", filled: final, state: "bad", label: final ? "Missed cut" : "Cut", posText: golfer.posDisplay, toParText: golfer.scoreDisplay };
+      }
+      // rounds 1-2, cut not yet applied to anyone tournament-wide -> pending; else made it
+      const cutKnown = lb.competitors.some((c) => c.isCut);
+      if (!cutKnown && lb.eventState !== "post") {
+        return { mark: "diamond", filled: false, state: "pending", label: "Cut pending", posText: golfer.posDisplay, toParText: golfer.scoreDisplay };
+      }
+      return { mark: "circle", filled: final, state: "good", label: final ? "Made the cut" : "Made cut", posText: golfer.posDisplay, toParText: golfer.scoreDisplay };
+    }
+
+    // outright / topN
+    const threshold = bet.type === "outright" ? 1 : parseInt(bet.type.replace("top", ""), 10);
+    if (golfer.isCut) {
+      return { mark: "square", filled: true, state: "bad", label: "Missed cut", posText: golfer.posDisplay, toParText: golfer.scoreDisplay };
+    }
+    if (golfer.posNum === null) {
+      return { mark: "diamond", filled: false, state: "pending", label: "Not started", posText: golfer.posDisplay, toParText: golfer.scoreDisplay };
+    }
+    const satisfied = golfer.posNum <= threshold;
+    return {
+      mark: satisfied ? "circle" : "square",
+      filled: final,
+      state: satisfied ? "good" : "bad",
+      label: final ? (satisfied ? "Won" : "Lost") : "",
+      posText: golfer.posDisplay,
+      toParText: golfer.scoreDisplay,
+    };
+  }
+
+  /* ---------- rendering ---------- */
+  function fmtMoney(n) {
+    const v = Math.round(n * 100) / 100;
+    return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+
+  function markGlyph(mark) {
+    if (mark === "circle") return "";
+    if (mark === "square") return "";
+    if (mark === "diamond") return "";
+    return "–";
+  }
+
+  function timeAgo(d) {
+    if (!d) return "—";
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 5) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    return `${h}h ago`;
+  }
+
+  function render() {
+    renderTopbar();
+    renderSummary();
+    if (currentView === "bets") renderBets();
+    else renderTournaments();
+    document.getElementById("updatedText").textContent = timeAgo(lastUpdated);
+  }
+
+  function renderTopbar() {
+    const active = state.tournaments.find((t) => t.id === activeTournamentId) || state.tournaments[0];
+    const nameEl = document.getElementById("tnName");
+    const subEl = document.getElementById("tnSub");
+    if (!active) {
+      nameEl.textContent = "No tournament yet";
+      subEl.textContent = "Add one from the Tournaments tab";
+      return;
+    }
+    nameEl.textContent = active.name;
+    const lb = leaderboards[active.id];
+    subEl.textContent = lb ? (lb.stateDetail || lb.eventState) : "Loading…";
+  }
+
+  document.getElementById("tournamentSwitch").addEventListener("click", () => {
+    switchView("tournaments");
+  });
+
+  function renderSummary() {
+    const strip = document.getElementById("summaryStrip");
+    if (state.bets.length === 0) {
+      strip.hidden = true;
+      return;
+    }
+    strip.hidden = false;
+    let staked = 0;
+    let liveToWin = 0;
+    let wins = 0;
+    let losses = 0;
+    state.bets.forEach((bet) => {
+      const lb = leaderboards[bet.tournamentId];
+      staked += parseFloat(bet.stake) || 0;
+      const ev = evaluateBet(bet, lb);
+      const payout = americanPayout(bet.odds, bet.stake);
+      const final = lb && lb.eventState === "post";
+      if (final) {
+        if (ev.state === "good") wins++;
+        else if (ev.state === "bad") losses++;
+      } else if (payout && ev.state === "good") {
+        liveToWin += payout.profit;
+      }
+    });
+    document.getElementById("sumStaked").textContent = fmtMoney(staked);
+    document.getElementById("sumToWin").textContent = fmtMoney(liveToWin);
+    document.getElementById("sumRecord").textContent = `${wins}–${losses}`;
+  }
+
+  function renderBets() {
+    document.getElementById("view-bets").hidden = false;
+    document.getElementById("view-tournaments").hidden = true;
+    const list = document.getElementById("betList");
+    const empty = document.getElementById("emptyBets");
+    list.innerHTML = "";
+
+    if (state.bets.length === 0) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+
+    // group by tournament, most recently added tournament first
+    const groups = new Map();
+    state.bets.forEach((bet) => {
+      if (!groups.has(bet.tournamentId)) groups.set(bet.tournamentId, []);
+      groups.get(bet.tournamentId).push(bet);
+    });
+
+    const order = state.tournaments.map((t) => t.id).filter((id) => groups.has(id));
+
+    order.forEach((tid) => {
+      const t = state.tournaments.find((x) => x.id === tid);
+      const lb = leaderboards[tid];
+      const title = document.createElement("div");
+      title.className = "tournament-group-title";
+      title.innerHTML = `${escapeHtml(t ? t.name : "Tournament")} <span class="group-sub">${lb ? escapeHtml(lb.stateDetail || lb.eventState) : "loading"}</span>`;
+      list.appendChild(title);
+
+      groups.get(tid).forEach((bet) => {
+        list.appendChild(renderBetRow(bet, lb));
+      });
+    });
+  }
+
+  function renderBetRow(bet, lb) {
+    const ev = evaluateBet(bet, lb);
+    const payout = americanPayout(bet.odds, bet.stake);
+    const row = document.createElement("div");
+    row.className = `bet-row is-${ev.state}`;
+
+    const markEl = document.createElement("div");
+    markEl.className = `mark mark-${ev.mark}${ev.filled ? " filled" : ""}`;
+    if (ev.mark === "diamond") {
+      markEl.innerHTML = `<span>${markGlyph(ev.mark)}</span>`;
+    } else {
+      markEl.textContent = markGlyph(ev.mark);
+    }
+    row.appendChild(markEl);
+
+    const main = document.createElement("div");
+    main.className = "bet-main";
+    const typeLabel = bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+    main.innerHTML = `
+      <div class="bet-golfer">${escapeHtml(bet.golferName)}</div>
+      <div class="bet-type">${typeLabel}</div>
+      <div class="bet-meta">${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.profit) : ""}</div>
+    `;
+    row.appendChild(main);
+
+    const scoreEl = document.createElement("div");
+    scoreEl.className = "bet-score";
+    scoreEl.innerHTML = `
+      <div class="bet-pos">${escapeHtml(ev.posText)}</div>
+      <div class="bet-topar">${escapeHtml(ev.toParText)}</div>
+      ${ev.label ? `<div class="bet-status-label">${escapeHtml(ev.label)}</div>` : ""}
+    `;
+    row.appendChild(scoreEl);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "bet-remove";
+    removeBtn.setAttribute("aria-label", "Remove bet");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      askConfirm("bet", bet.id, `Remove ${bet.golferName} — ${typeLabel}?`);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
+  }
+
+  function renderTournaments() {
+    document.getElementById("view-bets").hidden = true;
+    document.getElementById("view-tournaments").hidden = false;
+
+    const qa = document.getElementById("quickAddList");
+    qa.innerHTML = `<div class="quick-add-item"><span class="qa-name">Loading this week…</span></div>`;
+    fetchThisWeek()
+      .then((events) => {
+        qa.innerHTML = "";
+        if (events.length === 0) {
+          qa.innerHTML = `<div class="quick-add-item"><span class="qa-name">Nothing scheduled this week</span></div>`;
+          return;
+        }
+        events.forEach((e) => {
+          const already = state.tournaments.some((t) => t.id === e.id);
+          const item = document.createElement("div");
+          item.className = "quick-add-item";
+          const date = new Date(e.date);
+          item.innerHTML = `
+            <div>
+              <div class="qa-name">${escapeHtml(e.name)}</div>
+              <div class="qa-date">${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
+            </div>
+          `;
+          if (already) {
+            const lbl = document.createElement("span");
+            lbl.className = "qa-added-label";
+            lbl.textContent = "Added";
+            item.appendChild(lbl);
+          } else {
+            const btn = document.createElement("button");
+            btn.className = "qa-add-btn";
+            btn.textContent = "Add";
+            btn.addEventListener("click", () => addTournament(e.id, e.name));
+            item.appendChild(btn);
+          }
+          qa.appendChild(item);
+        });
+      })
+      .catch(() => {
+        qa.innerHTML = `<div class="quick-add-item"><span class="qa-name">Couldn't load this week's schedule</span></div>`;
+      });
+
+    const tracked = document.getElementById("trackedList");
+    tracked.innerHTML = "";
+    if (state.tournaments.length === 0) {
+      tracked.innerHTML = `<div class="tracked-item"><span class="qa-name">Nothing tracked yet</span></div>`;
+    }
+    state.tournaments.forEach((t) => {
+      const lb = leaderboards[t.id];
+      const item = document.createElement("div");
+      item.className = "tracked-item";
+      item.innerHTML = `
+        <div>
+          <div class="qa-name">${escapeHtml(t.name)}</div>
+          <div class="qa-date">${lb ? escapeHtml(lb.stateDetail || lb.eventState) : "loading…"}</div>
+        </div>
+      `;
+      const btn = document.createElement("button");
+      btn.className = "qa-remove-btn";
+      btn.textContent = "Remove";
+      const betCount = state.bets.filter((b) => b.tournamentId === t.id).length;
+      btn.addEventListener("click", () =>
+        askConfirm("tournament", t.id, betCount > 0 ? `Remove ${t.name} and its ${betCount} bet${betCount === 1 ? "" : "s"}?` : `Remove ${t.name}?`)
+      );
+      item.appendChild(btn);
+      tracked.appendChild(item);
+    });
+  }
+
+  function addTournament(id, name) {
+    if (state.tournaments.some((t) => t.id === id)) return;
+    state.tournaments.unshift({ id, name });
+    saveState();
+    if (!activeTournamentId) activeTournamentId = id;
+    if (leaderboards[id]) {
+      render();
+      return;
+    }
+    fetchLeaderboard(id)
+      .then((lb) => {
+        leaderboards[id] = lb;
+        render();
+      })
+      .catch(() => render());
+    render();
+  }
+
+  function removeTournament(id) {
+    state.tournaments = state.tournaments.filter((t) => t.id !== id);
+    state.bets = state.bets.filter((b) => b.tournamentId !== id);
+    delete leaderboards[id];
+    if (activeTournamentId === id) activeTournamentId = state.tournaments[0] ? state.tournaments[0].id : null;
+    saveState();
+    render();
+  }
+
+  function removeBet(id) {
+    state.bets = state.bets.filter((b) => b.id !== id);
+    saveState();
+    render();
+  }
+
+  function askConfirm(type, id, text) {
+    pendingRemove = { type, id };
+    document.getElementById("confirmText").textContent = text;
+    document.getElementById("confirmSheet").showModal();
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function extractEventId(input) {
+    const raw = input.trim();
+    if (/^\d+$/.test(raw)) return raw;
+    const m = raw.match(/tournamentId=(\d+)/) || raw.match(/event=(\d+)/) || raw.match(/leaderboard\/(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  /* ---------- view / nav wiring ---------- */
+  function switchView(v) {
+    currentView = v;
+    document.querySelectorAll(".tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === v));
+    render();
+  }
+  document.querySelectorAll(".tab").forEach((btn) => btn.addEventListener("click", () => switchView(btn.dataset.view)));
+
+  document.getElementById("refreshBtn").addEventListener("click", () => refreshAll());
+
+  document.getElementById("fab").addEventListener("click", () => openAddBet());
+
+  function openAddBet() {
+    if (state.tournaments.length === 0) {
+      switchView("tournaments");
+      return;
+    }
+    const sel = document.getElementById("betTournament");
+    sel.innerHTML = state.tournaments.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+    sel.value = activeTournamentId || state.tournaments[0].id;
+    populateGolferOptions(sel.value);
+    sel.onchange = () => populateGolferOptions(sel.value);
+    document.getElementById("addBetForm").reset();
+    sel.value = activeTournamentId || state.tournaments[0].id;
+    document.getElementById("betType").value = "outright";
+    toggleTypeFields();
+    document.getElementById("addBetSheet").showModal();
+  }
+
+  function populateGolferOptions(tournamentId) {
+    const dl = document.getElementById("golferOptions");
+    const lb = leaderboards[tournamentId];
+    dl.innerHTML = "";
+    if (!lb) return;
+    lb.competitors
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((c) => {
+        const opt = document.createElement("option");
+        opt.value = c.name;
+        dl.appendChild(opt);
+      });
+  }
+
+  document.getElementById("betType").addEventListener("change", toggleTypeFields);
+  function toggleTypeFields() {
+    const t = document.getElementById("betType").value;
+    document.getElementById("opponentField").hidden = t !== "h2h";
+    document.getElementById("customField").hidden = t !== "custom";
+    document.getElementById("betOpponent").required = t === "h2h";
+    document.getElementById("betCustom").required = t === "custom";
+  }
+
+  document.getElementById("cancelBetBtn").addEventListener("click", () => document.getElementById("addBetSheet").close());
+
+  document.getElementById("addBetForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const tournamentId = document.getElementById("betTournament").value;
+    const lb = leaderboards[tournamentId];
+    const golferName = document.getElementById("betGolfer").value.trim();
+    const type = document.getElementById("betType").value;
+    const oppName = document.getElementById("betOpponent").value.trim();
+    const custom = document.getElementById("betCustom").value.trim();
+    const odds = document.getElementById("betOdds").value.trim();
+    const stake = document.getElementById("betStake").value;
+    const notes = document.getElementById("betNotes").value.trim();
+
+    if (!golferName || !odds || !stake) return;
+    if (!americanPayout(odds, stake)) {
+      alert("Odds should look like +1500 or -110.");
+      return;
+    }
+
+    const golfer = lb ? lb.competitors.find((c) => c.name.toLowerCase() === golferName.toLowerCase()) : null;
+    let opponent = null;
+    if (type === "h2h") {
+      if (!oppName) return;
+      opponent = lb ? lb.competitors.find((c) => c.name.toLowerCase() === oppName.toLowerCase()) : null;
+    }
+
+    const bet = {
+      id: String(Date.now()) + Math.random().toString(36).slice(2, 7),
+      tournamentId,
+      golferId: golfer ? golfer.id : golferName,
+      golferName: golfer ? golfer.name : golferName,
+      type,
+      opponentId: opponent ? opponent.id : oppName || null,
+      opponentName: opponent ? opponent.name : oppName || null,
+      custom,
+      odds,
+      stake,
+      notes,
+    };
+    state.bets.push(bet);
+    activeTournamentId = tournamentId;
+    saveState();
+    document.getElementById("addBetSheet").close();
+    switchView("bets");
+  });
+
+  document.getElementById("addByLinkForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = document.getElementById("linkInput");
+    const errEl = document.getElementById("linkError");
+    const id = extractEventId(input.value);
+    if (!id) {
+      errEl.textContent = "Couldn't find an event ID in that. Try pasting the full ESPN leaderboard link.";
+      errEl.hidden = false;
+      return;
+    }
+    errEl.hidden = true;
+    fetchLeaderboard(id)
+      .then((lb) => {
+        leaderboards[id] = lb;
+        addTournament(id, lb.name);
+        input.value = "";
+      })
+      .catch(() => {
+        errEl.textContent = "Couldn't find that tournament on ESPN.";
+        errEl.hidden = false;
+      });
+  });
+
+  document.getElementById("confirmCancelBtn").addEventListener("click", () => {
+    pendingRemove = null;
+    document.getElementById("confirmSheet").close();
+  });
+  document.getElementById("confirmOkBtn").addEventListener("click", () => {
+    if (pendingRemove) {
+      if (pendingRemove.type === "bet") removeBet(pendingRemove.id);
+      else removeTournament(pendingRemove.id);
+    }
+    pendingRemove = null;
+    document.getElementById("confirmSheet").close();
+  });
+
+  /* ---------- polling ---------- */
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+      if (!document.hidden) refreshAll();
+    }, REFRESH_MS);
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAll();
+  });
+
+  /* ---------- boot ---------- */
+  render();
+  refreshAll();
+  startPolling();
+})();

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Circle &amp; Square — Bet Tracker</title>
+<meta name="description" content="Track your tournament golf bets against the live leaderboard.">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="favicon-32.png" type="image/png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Circle &amp; Square">
+<meta name="theme-color" content="#F3EEDF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#10160F" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <header class="topbar">
+    <button id="tournamentSwitch" class="tournament-switch" type="button">
+      <span class="tournament-name" id="tnName">Loading…</span>
+      <span class="tournament-sub" id="tnSub">&nbsp;</span>
+    </button>
+    <button id="refreshBtn" class="live-indicator" type="button" aria-label="Refresh scores">
+      <span class="dot" id="liveDot"></span>
+      <span id="updatedText">—</span>
+    </button>
+  </header>
+
+  <section class="summary-strip" id="summaryStrip" hidden>
+    <div class="summary-item">
+      <span class="summary-label">Staked</span>
+      <span class="summary-value" id="sumStaked">$0</span>
+    </div>
+    <div class="summary-item">
+      <span class="summary-label">Live to win</span>
+      <span class="summary-value" id="sumToWin">$0</span>
+    </div>
+    <div class="summary-item">
+      <span class="summary-label">Record</span>
+      <span class="summary-value" id="sumRecord">0–0</span>
+    </div>
+  </section>
+
+  <main id="view-bets" class="view">
+    <div id="betList" class="bet-list"></div>
+    <div id="emptyBets" class="empty-state" hidden>
+      <p class="empty-title">No bets logged yet</p>
+      <p class="empty-sub">Tap the + to mark your first card.</p>
+    </div>
+  </main>
+
+  <main id="view-tournaments" class="view" hidden>
+    <h2 class="section-heading">This week</h2>
+    <div id="quickAddList" class="quick-add-list"></div>
+
+    <h2 class="section-heading">Tracked</h2>
+    <div id="trackedList" class="tracked-list"></div>
+
+    <h2 class="section-heading">Add by link or ID</h2>
+    <form id="addByLinkForm" class="inline-form">
+      <input type="text" id="linkInput" placeholder="Paste an espn.com/golf/leaderboard link or event ID" autocapitalize="off" autocorrect="off">
+      <button type="submit">Add</button>
+    </form>
+    <p id="linkError" class="field-error" hidden></p>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-view="bets" type="button">
+      <span class="tab-mark">◎</span>
+      <span>My Bets</span>
+    </button>
+    <button class="tab" data-view="tournaments" type="button">
+      <span class="tab-mark">▤</span>
+      <span>Tournaments</span>
+    </button>
+  </nav>
+
+  <button id="fab" class="fab" type="button" aria-label="Add bet">+</button>
+</div>
+
+<dialog id="addBetSheet" class="sheet">
+  <form id="addBetForm" method="dialog">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">Mark a card</h2>
+
+    <label class="field">
+      <span class="field-label">Tournament</span>
+      <select id="betTournament" required></select>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Golfer</span>
+      <input type="text" id="betGolfer" list="golferOptions" required autocapitalize="words" autocomplete="off" placeholder="Start typing a name…">
+      <datalist id="golferOptions"></datalist>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Bet type</span>
+      <select id="betType">
+        <option value="outright">Outright winner</option>
+        <option value="top5">Top 5</option>
+        <option value="top10">Top 10</option>
+        <option value="top20">Top 20</option>
+        <option value="top30">Top 30</option>
+        <option value="makecut">Makes the cut</option>
+        <option value="h2h">Head-to-head</option>
+        <option value="custom">Other / prop</option>
+      </select>
+    </label>
+
+    <label class="field" id="opponentField" hidden>
+      <span class="field-label">Versus</span>
+      <input type="text" id="betOpponent" list="golferOptions" autocapitalize="words" autocomplete="off" placeholder="Opposing golfer…">
+    </label>
+
+    <label class="field" id="customField" hidden>
+      <span class="field-label">What's the bet?</span>
+      <input type="text" id="betCustom" maxlength="80" placeholder="e.g. top American finisher">
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span class="field-label">Odds</span>
+        <input type="text" id="betOdds" required placeholder="+1500 or -110" inputmode="numeric">
+      </label>
+      <label class="field">
+        <span class="field-label">Stake ($)</span>
+        <input type="number" id="betStake" required min="0" step="1" placeholder="20" inputmode="decimal">
+      </label>
+    </div>
+
+    <label class="field">
+      <span class="field-label">Notes (optional)</span>
+      <input type="text" id="betNotes" maxlength="120" placeholder="e.g. hedge, live bet, etc.">
+    </label>
+
+    <div class="sheet-actions">
+      <button type="button" id="cancelBetBtn" class="btn-ghost">Cancel</button>
+      <button type="submit" class="btn-primary">Save bet</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirmSheet" class="sheet sheet-small">
+  <div class="sheet-handle"></div>
+  <p id="confirmText" class="confirm-text"></p>
+  <div class="sheet-actions">
+    <button type="button" id="confirmCancelBtn" class="btn-ghost">Cancel</button>
+    <button type="button" id="confirmOkBtn" class="btn-danger">Remove</button>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
