@@ -679,8 +679,21 @@
   function populateGolferOptions(tournamentId) {
     const dl = document.getElementById("golferOptions");
     const lb = leaderboards[tournamentId];
+    if (!lb) {
+      dl.innerHTML = "";
+      // leaderboard hasn't loaded yet — fetch it now and populate once it arrives,
+      // as long as the tournament selector still points at this tournament
+      fetchLeaderboard(tournamentId)
+        .then((fetchedLb) => {
+          leaderboards[tournamentId] = fetchedLb;
+          const sel = document.getElementById("betTournament");
+          if (sel && sel.value === tournamentId) populateGolferOptions(tournamentId);
+          render();
+        })
+        .catch(() => {});
+      return;
+    }
     dl.innerHTML = "";
-    if (!lb) return;
     lb.competitors
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
