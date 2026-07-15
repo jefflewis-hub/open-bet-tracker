@@ -310,7 +310,7 @@
         if (ev.state === "good") wins++;
         else if (ev.state === "bad") losses++;
       } else if (payout && ev.state === "good") {
-        liveToWin += payout.profit;
+        liveToWin += payout.toReturn;
       }
     });
 
@@ -324,7 +324,7 @@
         if (pr.state === "good") wins++;
         else if (pr.state === "bad") losses++;
       } else if (payout) {
-        liveToWin += payout.profit;
+        liveToWin += payout.toReturn;
       }
     });
 
@@ -405,7 +405,7 @@
     main.innerHTML = `
       <div class="bet-golfer">${legs.length}-leg parlay</div>
       <div class="bet-type">${escapeHtml(names)}</div>
-      <div class="bet-meta">${escapeHtml(parlay.odds)} · ${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.profit) : ""}</div>
+      <div class="bet-meta">${escapeHtml(parlay.odds)} · ${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}</div>
     `;
     header.appendChild(main);
 
@@ -472,7 +472,7 @@
     main.innerHTML = `
       <div class="bet-golfer">${escapeHtml(bet.golferName)}</div>
       <div class="bet-type">${typeLabel}</div>
-      <div class="bet-meta">${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.profit) : ""}</div>
+      <div class="bet-meta">${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}</div>
     `;
     row.appendChild(main);
 
