@@ -54,6 +54,7 @@
       <p class="empty-title">No bets logged yet</p>
       <p class="empty-sub">Tap the + to mark your first card.</p>
     </div>
+    <button id="combineBtn" class="combine-link" type="button" hidden>+ Combine legs into a parlay</button>
   </main>
 
   <main id="view-tournaments" class="view" hidden>
@@ -144,6 +145,40 @@
     <div class="sheet-actions">
       <button type="button" id="cancelBetBtn" class="btn-ghost">Cancel</button>
       <button type="submit" class="btn-primary">Save bet</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="parlaySheet" class="sheet">
+  <form id="parlayForm" method="dialog">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">New parlay</h2>
+
+    <div class="field">
+      <span class="field-label">Legs</span>
+      <div id="parlayLegList" class="leg-checklist"></div>
+      <p id="parlayLegError" class="field-error" hidden>Pick at least 2 legs.</p>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span class="field-label">Combined odds</span>
+        <input type="text" id="parlayOdds" required placeholder="+1500 or -110" inputmode="numeric">
+      </label>
+      <label class="field">
+        <span class="field-label">Stake ($)</span>
+        <input type="number" id="parlayStake" required min="0" step="1" placeholder="20" inputmode="decimal">
+      </label>
+    </div>
+
+    <label class="field">
+      <span class="field-label">Notes (optional)</span>
+      <input type="text" id="parlayNotes" maxlength="120" placeholder="e.g. same-day live parlay">
+    </label>
+
+    <div class="sheet-actions">
+      <button type="button" id="cancelParlayBtn" class="btn-ghost">Cancel</button>
+      <button type="submit" class="btn-primary">Save parlay</button>
     </div>
   </form>
 </dialog>

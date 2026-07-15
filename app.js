@@ -24,14 +24,20 @@
   let currentView = "bets";
   let pollTimer = null;
   let lastUpdated = null;
-  let pendingRemove = null; // {type:'bet'|'tournament', id}
+  let pendingRemove = null; // {type:'bet'|'tournament'|'parlay', id}
 
   function loadState() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (!parsed.tournaments) parsed.tournaments = [];
+        if (!parsed.bets) parsed.bets = [];
+        if (!parsed.parlays) parsed.parlays = [];
+        return parsed;
+      }
     } catch (e) {}
-    return { tournaments: [], bets: [] };
+    return { tournaments: [], bets: [], parlays: [] };
   }
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -221,6 +227,17 @@
     };
   }
 
+  function evaluateParlay(parlay, legBets) {
+    // won only once every leg is settled good; lost the instant any leg is settled bad
+    const legResults = legBets.map((bet) => ({ bet, ev: evaluateBet(bet, leaderboards[bet.tournamentId]) }));
+    const anyLost = legResults.some((l) => l.ev.state === "bad" && l.ev.filled);
+    const allWon = legResults.length > 0 && legResults.every((l) => l.ev.state === "good" && l.ev.filled);
+    const aliveCount = legResults.filter((l) => l.ev.state === "good").length;
+    if (anyLost) return { mark: "square", filled: true, state: "bad", label: "Lost", legResults };
+    if (allWon) return { mark: "circle", filled: true, state: "good", label: "Won", legResults };
+    return { mark: "diamond", filled: false, state: "pending", label: `${aliveCount}/${legResults.length} live`, legResults };
+  }
+
   /* ---------- rendering ---------- */
   function fmtMoney(n) {
     const v = Math.round(n * 100) / 100;
@@ -282,19 +299,35 @@
     let liveToWin = 0;
     let wins = 0;
     let losses = 0;
+
     state.bets.forEach((bet) => {
+      if (bet.parlayId) return; // counted via its parlay instead
       const lb = leaderboards[bet.tournamentId];
       staked += parseFloat(bet.stake) || 0;
       const ev = evaluateBet(bet, lb);
       const payout = americanPayout(bet.odds, bet.stake);
-      const final = lb && lb.eventState === "post";
-      if (final) {
+      if (ev.filled) {
         if (ev.state === "good") wins++;
         else if (ev.state === "bad") losses++;
       } else if (payout && ev.state === "good") {
         liveToWin += payout.profit;
       }
     });
+
+    state.parlays.forEach((parlay) => {
+      const legs = parlay.legIds.map((id) => state.bets.find((b) => b.id === id)).filter(Boolean);
+      if (legs.length === 0) return;
+      staked += parseFloat(parlay.stake) || 0;
+      const pr = evaluateParlay(parlay, legs);
+      const payout = americanPayout(parlay.odds, parlay.stake);
+      if (pr.filled) {
+        if (pr.state === "good") wins++;
+        else if (pr.state === "bad") losses++;
+      } else if (payout) {
+        liveToWin += payout.profit;
+      }
+    });
+
     document.getElementById("sumStaked").textContent = fmtMoney(staked);
     document.getElementById("sumToWin").textContent = fmtMoney(liveToWin);
     document.getElementById("sumRecord").textContent = `${wins}–${losses}`;
@@ -309,13 +342,27 @@
 
     if (state.bets.length === 0) {
       empty.hidden = false;
+      updateCombineButton();
       return;
     }
     empty.hidden = true;
 
-    // group by tournament, most recently added tournament first
+    if (state.parlays.length > 0) {
+      const title = document.createElement("div");
+      title.className = "tournament-group-title";
+      title.textContent = state.parlays.length === 1 ? "Parlay" : "Parlays";
+      list.appendChild(title);
+      state.parlays.forEach((parlay) => {
+        const legs = parlay.legIds.map((id) => state.bets.find((b) => b.id === id)).filter(Boolean);
+        if (legs.length === 0) return;
+        list.appendChild(renderParlayCard(parlay, legs));
+      });
+    }
+
+    // group standalone (non-parlay) bets by tournament, most recently added tournament first
     const groups = new Map();
     state.bets.forEach((bet) => {
+      if (bet.parlayId) return;
       if (!groups.has(bet.tournamentId)) groups.set(bet.tournamentId, []);
       groups.get(bet.tournamentId).push(bet);
     });
@@ -334,6 +381,74 @@
         list.appendChild(renderBetRow(bet, lb));
       });
     });
+
+    updateCombineButton();
+  }
+
+  function renderParlayCard(parlay, legs) {
+    const pr = evaluateParlay(parlay, legs);
+    const payout = americanPayout(parlay.odds, parlay.stake);
+    const card = document.createElement("div");
+    card.className = "parlay-card";
+
+    const header = document.createElement("div");
+    header.className = `bet-row is-${pr.state}`;
+
+    const markEl = document.createElement("div");
+    markEl.className = `mark mark-${pr.mark}${pr.filled ? " filled" : ""}`;
+    markEl.innerHTML = pr.mark === "diamond" ? `<span>${markGlyph(pr.mark)}</span>` : markGlyph(pr.mark);
+    header.appendChild(markEl);
+
+    const main = document.createElement("div");
+    main.className = "bet-main";
+    const names = legs.map((l) => l.golferName).join(", ");
+    main.innerHTML = `
+      <div class="bet-golfer">${legs.length}-leg parlay</div>
+      <div class="bet-type">${escapeHtml(names)}</div>
+      <div class="bet-meta">${escapeHtml(parlay.odds)} · ${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.profit) : ""}</div>
+    `;
+    header.appendChild(main);
+
+    const scoreEl = document.createElement("div");
+    scoreEl.className = "bet-score";
+    scoreEl.innerHTML = `<div class="bet-status-label">${escapeHtml(pr.label)}</div>`;
+    header.appendChild(scoreEl);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "bet-remove";
+    removeBtn.setAttribute("aria-label", "Remove parlay");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      askConfirm("parlay", parlay.id, `Remove this ${legs.length}-leg parlay? Legs go back to your bet list individually.`);
+    });
+    header.appendChild(removeBtn);
+
+    card.appendChild(header);
+
+    const legsEl = document.createElement("div");
+    legsEl.className = "parlay-legs";
+    pr.legResults.forEach(({ bet, ev }) => {
+      const row = document.createElement("div");
+      row.className = "parlay-leg-row";
+      const typeLabel =
+        bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+      row.innerHTML = `
+        <span class="leg-dot leg-${ev.state}"></span>
+        <span class="leg-name">${escapeHtml(bet.golferName)} — ${typeLabel}</span>
+        <span class="leg-pos">${escapeHtml(ev.posText)}</span>
+      `;
+      legsEl.appendChild(row);
+    });
+    card.appendChild(legsEl);
+
+    return card;
+  }
+
+  function updateCombineButton() {
+    const btn = document.getElementById("combineBtn");
+    const eligible = state.bets.filter((b) => !b.parlayId);
+    btn.hidden = eligible.length < 2;
   }
 
   function renderBetRow(bet, lb) {
@@ -476,12 +591,41 @@
     state.bets = state.bets.filter((b) => b.tournamentId !== id);
     delete leaderboards[id];
     if (activeTournamentId === id) activeTournamentId = state.tournaments[0] ? state.tournaments[0].id : null;
+    state.parlays.forEach((p) => cleanupParlay(p.id));
     saveState();
     render();
   }
 
   function removeBet(id) {
     state.bets = state.bets.filter((b) => b.id !== id);
+    state.parlays.forEach((p) => cleanupParlay(p.id));
+    saveState();
+    render();
+  }
+
+  // drops legs that no longer exist; dissolves the parlay (freeing remaining legs) if fewer than 2 legs remain
+  function cleanupParlay(parlayId) {
+    const parlay = state.parlays.find((p) => p.id === parlayId);
+    if (!parlay) return;
+    parlay.legIds = parlay.legIds.filter((legId) => state.bets.some((b) => b.id === legId));
+    if (parlay.legIds.length < 2) {
+      parlay.legIds.forEach((legId) => {
+        const b = state.bets.find((x) => x.id === legId);
+        if (b) delete b.parlayId;
+      });
+      state.parlays = state.parlays.filter((p) => p.id !== parlayId);
+    }
+  }
+
+  function removeParlay(id) {
+    const parlay = state.parlays.find((p) => p.id === id);
+    if (parlay) {
+      parlay.legIds.forEach((legId) => {
+        const b = state.bets.find((x) => x.id === legId);
+        if (b) delete b.parlayId;
+      });
+    }
+    state.parlays = state.parlays.filter((p) => p.id !== id);
     saveState();
     render();
   }
@@ -633,10 +777,74 @@
   document.getElementById("confirmOkBtn").addEventListener("click", () => {
     if (pendingRemove) {
       if (pendingRemove.type === "bet") removeBet(pendingRemove.id);
+      else if (pendingRemove.type === "parlay") removeParlay(pendingRemove.id);
       else removeTournament(pendingRemove.id);
     }
     pendingRemove = null;
     document.getElementById("confirmSheet").close();
+  });
+
+  /* ---------- parlay sheet ---------- */
+  document.getElementById("combineBtn").addEventListener("click", () => openParlaySheet());
+  document.getElementById("cancelParlayBtn").addEventListener("click", () => document.getElementById("parlaySheet").close());
+
+  function openParlaySheet() {
+    const eligible = state.bets.filter((b) => !b.parlayId);
+    const list = document.getElementById("parlayLegList");
+    list.innerHTML = "";
+    eligible.forEach((bet) => {
+      const t = state.tournaments.find((x) => x.id === bet.tournamentId);
+      const typeLabel =
+        bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+      const row = document.createElement("label");
+      row.className = "leg-check-row";
+      row.innerHTML = `
+        <input type="checkbox" value="${escapeHtml(bet.id)}">
+        <span class="leg-check-main">
+          <span class="leg-check-golfer">${escapeHtml(bet.golferName)}</span>
+          <span class="leg-check-meta">${typeLabel} · ${escapeHtml(t ? t.name : "")} · ${escapeHtml(bet.odds)}</span>
+        </span>
+      `;
+      list.appendChild(row);
+    });
+    document.getElementById("parlayForm").reset();
+    document.getElementById("parlayLegError").hidden = true;
+    document.getElementById("parlaySheet").showModal();
+  }
+
+  document.getElementById("parlayForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const checked = Array.from(document.querySelectorAll('#parlayLegList input[type="checkbox"]:checked')).map((el) => el.value);
+    const errEl = document.getElementById("parlayLegError");
+    if (checked.length < 2) {
+      errEl.hidden = false;
+      return;
+    }
+    errEl.hidden = true;
+    const odds = document.getElementById("parlayOdds").value.trim();
+    const stake = document.getElementById("parlayStake").value;
+    const notes = document.getElementById("parlayNotes").value.trim();
+    if (!odds || !stake) return;
+    if (!americanPayout(odds, stake)) {
+      alert("Odds should look like +1500 or -110.");
+      return;
+    }
+
+    const parlay = {
+      id: "p" + String(Date.now()) + Math.random().toString(36).slice(2, 7),
+      legIds: checked,
+      odds,
+      stake,
+      notes,
+    };
+    state.parlays.push(parlay);
+    checked.forEach((betId) => {
+      const bet = state.bets.find((b) => b.id === betId);
+      if (bet) bet.parlayId = parlay.id;
+    });
+    saveState();
+    document.getElementById("parlaySheet").close();
+    render();
   });
 
   /* ---------- polling ---------- */

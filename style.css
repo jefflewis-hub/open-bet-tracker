@@ -322,6 +322,85 @@ h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
   line-height: 1;
 }
 
+/* ---------- parlays ---------- */
+.combine-link {
+  display: block;
+  width: calc(100% - 36px);
+  margin: 14px 18px 4px;
+  background: none;
+  border: 1px dashed var(--line);
+  color: var(--accent);
+  border-radius: var(--radius-s);
+  padding: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.parlay-card { border-bottom: 1px solid var(--line); }
+.parlay-card .bet-row { border-bottom: none; }
+.parlay-legs {
+  padding: 0 18px 12px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.parlay-leg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+.leg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--line);
+}
+.leg-dot.leg-good { background: var(--good); }
+.leg-dot.leg-bad { background: var(--critical); }
+.leg-dot.leg-pending { background: var(--pending); }
+.leg-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.leg-pos {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.leg-checklist {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--bg);
+}
+.leg-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+.leg-check-row:last-child { border-bottom: none; }
+.leg-check-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.leg-check-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.leg-check-golfer { font-weight: 500; }
+.leg-check-meta { font-size: 0.72rem; color: var(--ink-soft); }
+
 /* ---------- empty state ---------- */
 .empty-state { padding: 60px 32px; text-align: center; }
 .empty-title { font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
