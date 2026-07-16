@@ -11,7 +11,7 @@
     top5: "Top 5",
     top10: "Top 10",
     top20: "Top 20",
-    top30: "Top 30",
+    top40: "Top 40",
     makecut: "Makes the cut",
     h2h: "Head-to-head",
     custom: "Prop",
@@ -19,6 +19,7 @@
 
   /* ---------- state ---------- */
   let state = loadState();
+  saveState(); // persist any migration loadState() just applied (e.g. top30 -> top40)
   let leaderboards = {}; // eventId -> { tournament, competitors: Map(id->comp), eventState, roundDetail }
   let activeTournamentId = state.tournaments[0] ? state.tournaments[0].id : null;
   let currentView = "bets";
@@ -36,6 +37,10 @@
         if (!parsed.bets) parsed.bets = [];
         if (!parsed.parlays) parsed.parlays = [];
         if (!parsed.otherBets) parsed.otherBets = [];
+        // "Top 30" was never a real market — any bet/leg placed under it is really Top 40
+        parsed.bets.forEach((b) => {
+          if (b.type === "top30") b.type = "top40";
+        });
         return parsed;
       }
     } catch (e) {}
@@ -497,11 +502,13 @@
     const main = document.createElement("div");
     main.className = "bet-main";
     const names = legs.map((l) => l.golferName).join(", ");
+    const uniformType = legs.length > 0 && legs.every((l) => l.type === legs[0].type) ? legs[0].type : null;
+    const headline = uniformType ? `${legs.length}-leg ${BET_TYPE_LABELS[uniformType]} parlay` : `${legs.length}-leg parlay`;
     const parlayMeta = parlay.odds
       ? `${escapeHtml(parlay.odds)} · ${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`
       : `${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`;
     main.innerHTML = `
-      <div class="bet-golfer">${legs.length}-leg parlay</div>
+      <div class="bet-golfer">${escapeHtml(headline)}</div>
       <div class="bet-type">${escapeHtml(names)}</div>
       <div class="bet-meta">${parlayMeta}</div>
     `;
@@ -980,7 +987,7 @@
           <option value="top5">Top 5</option>
           <option value="top10">Top 10</option>
           <option value="top20">Top 20</option>
-          <option value="top30">Top 30</option>
+          <option value="top40">Top 40</option>
           <option value="makecut">Makes the cut</option>
           <option value="h2h">Head-to-head</option>
           <option value="custom">Other / prop</option>
