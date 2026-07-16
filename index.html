@@ -55,6 +55,7 @@
       <p class="empty-sub">Tap the + to mark your first card.</p>
     </div>
     <button id="combineBtn" class="combine-link" type="button" hidden>+ New parlay</button>
+    <button id="otherBetBtn" class="combine-link" type="button">+ Other bet</button>
   </main>
 
   <main id="view-tournaments" class="view" hidden>
@@ -185,6 +186,40 @@
     <div class="sheet-actions">
       <button type="button" id="cancelParlayBtn" class="btn-ghost">Cancel</button>
       <button type="submit" class="btn-primary">Save parlay</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="otherBetSheet" class="sheet">
+  <form id="otherBetForm" method="dialog">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">Other bet</h2>
+    <p class="sheet-subtitle">For anything outside a golf leaderboard — Polymarket, a side bet, whatever. You'll grade it yourself by tapping its status.</p>
+
+    <label class="field">
+      <span class="field-label">What's the bet?</span>
+      <input type="text" id="otherBetDesc" required maxlength="120" placeholder="e.g. Polymarket — Fed cuts in March">
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span class="field-label">Stake ($)</span>
+        <input type="number" id="otherBetStake" required min="0" step="1" placeholder="20" inputmode="decimal">
+      </label>
+      <label class="field">
+        <span class="field-label">To win ($)</span>
+        <input type="number" id="otherBetToWin" required min="0" step="1" placeholder="35" inputmode="decimal">
+      </label>
+    </div>
+
+    <label class="field">
+      <span class="field-label">Notes (optional)</span>
+      <input type="text" id="otherBetNotes" maxlength="120" placeholder="e.g. link or market ID">
+    </label>
+
+    <div class="sheet-actions">
+      <button type="button" id="cancelOtherBetBtn" class="btn-ghost">Cancel</button>
+      <button type="submit" class="btn-primary">Save bet</button>
     </div>
   </form>
 </dialog>

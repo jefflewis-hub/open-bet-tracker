@@ -259,6 +259,7 @@ h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
   font-weight: 600;
   font-size: 0.85rem;
 }
+button.mark { background: none; padding: 0; cursor: pointer; }
 .mark-circle { border: 2.5px solid var(--good); color: var(--good); }
 .mark-circle.filled { background: var(--good); color: var(--accent-ink); }
 .mark-square { border: 2.5px solid var(--critical); color: var(--critical); border-radius: var(--radius-s); }
@@ -564,6 +565,7 @@ h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
   margin: 4px auto 14px;
 }
 .sheet-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 14px; }
+.sheet-subtitle { font-size: 0.8rem; color: var(--ink-soft); margin: -8px 0 14px; }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; flex: 1; }
 .field-label { font-size: 0.72rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; }

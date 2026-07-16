@@ -24,7 +24,7 @@
   let currentView = "bets";
   let pollTimer = null;
   let lastUpdated = null;
-  let pendingRemove = null; // {type:'bet'|'tournament'|'parlay', id}
+  let pendingRemove = null; // {type:'bet'|'tournament'|'parlay'|'otherBet', id}
 
   function loadState() {
     try {
@@ -34,10 +34,11 @@
         if (!parsed.tournaments) parsed.tournaments = [];
         if (!parsed.bets) parsed.bets = [];
         if (!parsed.parlays) parsed.parlays = [];
+        if (!parsed.otherBets) parsed.otherBets = [];
         return parsed;
       }
     } catch (e) {}
-    return { tournaments: [], bets: [], parlays: [] };
+    return { tournaments: [], bets: [], parlays: [], otherBets: [] };
   }
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -290,7 +291,7 @@
 
   function renderSummary() {
     const strip = document.getElementById("summaryStrip");
-    if (state.bets.length === 0) {
+    if (state.bets.length === 0 && state.otherBets.length === 0) {
       strip.hidden = true;
       return;
     }
@@ -328,6 +329,14 @@
       }
     });
 
+    state.otherBets.forEach((bet) => {
+      staked += parseFloat(bet.stake) || 0;
+      const toWin = parseFloat(bet.toWin) || 0;
+      if (bet.status === "won") wins++;
+      else if (bet.status === "lost") losses++;
+      else liveToWin += toWin;
+    });
+
     document.getElementById("sumStaked").textContent = fmtMoney(staked);
     document.getElementById("sumToWin").textContent = fmtMoney(liveToWin);
     document.getElementById("sumRecord").textContent = `${wins}–${losses}`;
@@ -340,7 +349,7 @@
     const empty = document.getElementById("emptyBets");
     list.innerHTML = "";
 
-    if (state.bets.length === 0) {
+    if (state.bets.length === 0 && state.otherBets.length === 0) {
       empty.hidden = false;
       updateCombineButton();
       return;
@@ -382,7 +391,78 @@
       });
     });
 
+    if (state.otherBets.length > 0) {
+      const title = document.createElement("div");
+      title.className = "tournament-group-title";
+      title.textContent = "Other Bets";
+      list.appendChild(title);
+      state.otherBets.forEach((bet) => list.appendChild(renderOtherBetRow(bet)));
+    }
+
     updateCombineButton();
+  }
+
+  const OTHER_BET_STATES = {
+    pending: { mark: "diamond", filled: false, state: "pending", label: "Pending" },
+    won: { mark: "circle", filled: true, state: "good", label: "Won" },
+    lost: { mark: "square", filled: true, state: "bad", label: "Lost" },
+  };
+
+  function renderOtherBetRow(bet) {
+    const info = OTHER_BET_STATES[bet.status] || OTHER_BET_STATES.pending;
+    const row = document.createElement("div");
+    row.className = `bet-row is-${info.state}`;
+
+    const markBtn = document.createElement("button");
+    markBtn.type = "button";
+    markBtn.className = `mark mark-${info.mark}${info.filled ? " filled" : ""}`;
+    markBtn.setAttribute("aria-label", "Tap to change status");
+    markBtn.innerHTML = info.mark === "diamond" ? `<span>${markGlyph(info.mark)}</span>` : markGlyph(info.mark);
+    markBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cycleOtherBetStatus(bet.id);
+    });
+    row.appendChild(markBtn);
+
+    const main = document.createElement("div");
+    main.className = "bet-main";
+    main.innerHTML = `
+      <div class="bet-golfer">${escapeHtml(bet.description)}</div>
+      <div class="bet-meta">${fmtMoney(parseFloat(bet.stake) || 0)} to win ${fmtMoney(parseFloat(bet.toWin) || 0)}</div>
+    `;
+    row.appendChild(main);
+
+    const scoreEl = document.createElement("div");
+    scoreEl.className = "bet-score";
+    scoreEl.innerHTML = `<div class="bet-status-label">${escapeHtml(info.label)}</div>`;
+    row.appendChild(scoreEl);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "bet-remove";
+    removeBtn.setAttribute("aria-label", "Remove bet");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      askConfirm("otherBet", bet.id, `Remove "${bet.description}"?`);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
+  }
+
+  function cycleOtherBetStatus(id) {
+    const bet = state.otherBets.find((b) => b.id === id);
+    if (!bet) return;
+    const order = ["pending", "won", "lost"];
+    bet.status = order[(order.indexOf(bet.status || "pending") + 1) % order.length];
+    saveState();
+    render();
+  }
+
+  function removeOtherBet(id) {
+    state.otherBets = state.otherBets.filter((b) => b.id !== id);
+    saveState();
+    render();
   }
 
   function renderParlayCard(parlay, legs) {
@@ -794,6 +874,7 @@
     if (pendingRemove) {
       if (pendingRemove.type === "bet") removeBet(pendingRemove.id);
       else if (pendingRemove.type === "parlay") removeParlay(pendingRemove.id);
+      else if (pendingRemove.type === "otherBet") removeOtherBet(pendingRemove.id);
       else removeTournament(pendingRemove.id);
     }
     pendingRemove = null;
@@ -1000,6 +1081,34 @@
     saveState();
     document.getElementById("parlaySheet").close();
     render();
+  });
+
+  /* ---------- other bet sheet ---------- */
+  document.getElementById("otherBetBtn").addEventListener("click", () => {
+    document.getElementById("otherBetForm").reset();
+    document.getElementById("otherBetSheet").showModal();
+  });
+  document.getElementById("cancelOtherBetBtn").addEventListener("click", () => document.getElementById("otherBetSheet").close());
+
+  document.getElementById("otherBetForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const description = document.getElementById("otherBetDesc").value.trim();
+    const stake = document.getElementById("otherBetStake").value;
+    const toWin = document.getElementById("otherBetToWin").value;
+    const notes = document.getElementById("otherBetNotes").value.trim();
+    if (!description || !stake || !toWin) return;
+
+    state.otherBets.push({
+      id: "o" + String(Date.now()) + Math.random().toString(36).slice(2, 7),
+      description,
+      stake,
+      toWin,
+      notes,
+      status: "pending",
+    });
+    saveState();
+    document.getElementById("otherBetSheet").close();
+    switchView("bets");
   });
 
   /* ---------- polling ---------- */
