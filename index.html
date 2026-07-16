@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
@@ -127,14 +127,23 @@
       <input type="text" id="betCustom" maxlength="80" placeholder="e.g. top American finisher">
     </label>
 
+    <div class="mode-toggle" id="betModeToggle">
+      <button type="button" class="mode-btn active" data-mode="odds">By odds</button>
+      <button type="button" class="mode-btn" data-mode="payout">By payout</button>
+    </div>
+
     <div class="field-row">
-      <label class="field">
-        <span class="field-label">Odds</span>
-        <input type="text" id="betOdds" required placeholder="+1500 or -110" inputmode="numeric">
-      </label>
       <label class="field">
         <span class="field-label">Stake ($)</span>
         <input type="number" id="betStake" required min="0" step="1" placeholder="20" inputmode="decimal">
+      </label>
+      <label class="field" id="betOddsField">
+        <span class="field-label">Odds</span>
+        <input type="text" id="betOdds" placeholder="+1500 or -110" inputmode="numeric">
+      </label>
+      <label class="field" id="betToWinField" hidden>
+        <span class="field-label">To win ($)</span>
+        <input type="number" id="betToWin" min="0" step="1" placeholder="35" inputmode="decimal">
       </label>
     </div>
 
@@ -172,14 +181,23 @@
       <div id="parlayLegList" class="leg-checklist"></div>
     </div>
 
+    <div class="mode-toggle" id="parlayModeToggle">
+      <button type="button" class="mode-btn active" data-mode="odds">By odds</button>
+      <button type="button" class="mode-btn" data-mode="payout">By payout</button>
+    </div>
+
     <div class="field-row">
-      <label class="field">
-        <span class="field-label">Combined odds</span>
-        <input type="text" id="parlayOdds" required placeholder="+1500 or -110" inputmode="numeric">
-      </label>
       <label class="field">
         <span class="field-label">Stake ($)</span>
         <input type="number" id="parlayStake" required min="0" step="1" placeholder="20" inputmode="decimal">
+      </label>
+      <label class="field" id="parlayOddsField">
+        <span class="field-label">Combined odds</span>
+        <input type="text" id="parlayOdds" placeholder="+1500 or -110" inputmode="numeric">
+      </label>
+      <label class="field" id="parlayToWinField" hidden>
+        <span class="field-label">To win ($)</span>
+        <input type="number" id="parlayToWin" min="0" step="1" placeholder="35" inputmode="decimal">
       </label>
     </div>
 
@@ -238,6 +256,6 @@
   </div>
 </dialog>
 
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

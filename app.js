@@ -140,6 +140,17 @@
     return { profit, toReturn: s + profit };
   }
 
+  // works for a bet, parlay, or other-bet: uses a direct toWin amount if one was
+  // entered ("by payout" mode), otherwise falls back to American odds math
+  function getPayout(entity) {
+    if (entity.toWin !== undefined && entity.toWin !== null && entity.toWin !== "") {
+      const stake = parseFloat(entity.stake) || 0;
+      const toReturn = parseFloat(entity.toWin) || 0;
+      return { profit: toReturn - stake, toReturn };
+    }
+    return americanPayout(entity.odds, entity.stake);
+  }
+
   function evaluateBet(bet, lb) {
     // returns { mark: 'circle'|'square'|'diamond'|'dash', filled:bool, state:'good'|'bad'|'pending'|'neutral', label:string, posText, toParText }
     if (!lb) return { mark: "dash", filled: false, state: "neutral", label: "No data", posText: "—", toParText: "" };
@@ -307,7 +318,7 @@
       const lb = leaderboards[bet.tournamentId];
       staked += parseFloat(bet.stake) || 0;
       const ev = evaluateBet(bet, lb);
-      const payout = americanPayout(bet.odds, bet.stake);
+      const payout = getPayout(bet);
       if (ev.filled) {
         if (ev.state === "good") wins++;
         else if (ev.state === "bad") losses++;
@@ -321,7 +332,7 @@
       if (legs.length === 0) return;
       staked += parseFloat(parlay.stake) || 0;
       const pr = evaluateParlay(parlay, legs);
-      const payout = americanPayout(parlay.odds, parlay.stake);
+      const payout = getPayout(parlay);
       if (pr.filled) {
         if (pr.state === "good") wins++;
         else if (pr.state === "bad") losses++;
@@ -468,7 +479,7 @@
 
   function renderParlayCard(parlay, legs) {
     const pr = evaluateParlay(parlay, legs);
-    const payout = americanPayout(parlay.odds, parlay.stake);
+    const payout = getPayout(parlay);
     const card = document.createElement("div");
     card.className = "parlay-card";
 
@@ -483,10 +494,13 @@
     const main = document.createElement("div");
     main.className = "bet-main";
     const names = legs.map((l) => l.golferName).join(", ");
+    const parlayMeta = parlay.odds
+      ? `${escapeHtml(parlay.odds)} · ${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`
+      : `${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`;
     main.innerHTML = `
       <div class="bet-golfer">${legs.length}-leg parlay</div>
       <div class="bet-type">${escapeHtml(names)}</div>
-      <div class="bet-meta">${escapeHtml(parlay.odds)} · ${fmtMoney(parseFloat(parlay.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}</div>
+      <div class="bet-meta">${parlayMeta}</div>
     `;
     header.appendChild(main);
 
@@ -539,7 +553,7 @@
 
   function renderBetRow(bet, lb) {
     const ev = evaluateBet(bet, lb);
-    const payout = americanPayout(bet.odds, bet.stake);
+    const payout = getPayout(bet);
     const row = document.createElement("div");
     row.className = `bet-row is-${ev.state}`;
 
@@ -555,9 +569,14 @@
     const main = document.createElement("div");
     main.className = "bet-main";
     const typeLabel = bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
-    const metaText = bet.odds
-      ? `${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`
-      : "No odds set — was built as a parlay leg";
+    let metaText;
+    if (bet.odds) {
+      metaText = `${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`;
+    } else if (payout) {
+      metaText = `${fmtMoney(parseFloat(bet.stake) || 0)} to win ${fmtMoney(payout.toReturn)}`;
+    } else {
+      metaText = "No odds set — was built as a parlay leg";
+    }
     main.innerHTML = `
       <div class="bet-golfer">${escapeHtml(bet.golferName)}</div>
       <div class="bet-type">${typeLabel}</div>
@@ -762,6 +781,7 @@
     sel.value = activeTournamentId || state.tournaments[0].id;
     document.getElementById("betType").value = "outright";
     toggleTypeFields();
+    setToggleMode("betModeToggle", "betOddsField", "betToWinField", "odds");
     document.getElementById("addBetSheet").showModal();
   }
 
@@ -797,6 +817,24 @@
     populateDatalist(document.getElementById("golferOptions"), tournamentId, document.getElementById("betTournament"));
   }
 
+  // shared "by odds" / "by payout" toggle used on both the bet form and the parlay form
+  function wireModeToggle(toggleId, oddsFieldId, toWinFieldId) {
+    document.getElementById(toggleId).querySelectorAll(".mode-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setToggleMode(toggleId, oddsFieldId, toWinFieldId, btn.dataset.mode));
+    });
+  }
+  function setToggleMode(toggleId, oddsFieldId, toWinFieldId, mode) {
+    document.getElementById(toggleId).querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+    document.getElementById(oddsFieldId).hidden = mode === "payout";
+    document.getElementById(toWinFieldId).hidden = mode !== "payout";
+  }
+  function getToggleMode(toggleId) {
+    const active = document.querySelector(`#${toggleId} .mode-btn.active`);
+    return active ? active.dataset.mode : "odds";
+  }
+  wireModeToggle("betModeToggle", "betOddsField", "betToWinField");
+  wireModeToggle("parlayModeToggle", "parlayOddsField", "parlayToWinField");
+
   document.getElementById("betType").addEventListener("change", toggleTypeFields);
   function toggleTypeFields() {
     const t = document.getElementById("betType").value;
@@ -816,14 +854,25 @@
     const type = document.getElementById("betType").value;
     const oppName = document.getElementById("betOpponent").value.trim();
     const custom = document.getElementById("betCustom").value.trim();
-    const odds = document.getElementById("betOdds").value.trim();
     const stake = document.getElementById("betStake").value;
     const notes = document.getElementById("betNotes").value.trim();
 
-    if (!golferName || !odds || !stake) return;
-    if (!americanPayout(odds, stake)) {
-      alert("Odds should look like +1500 or -110.");
-      return;
+    let odds = "";
+    let toWin = "";
+    if (getToggleMode("betModeToggle") === "payout") {
+      toWin = document.getElementById("betToWin").value;
+      if (!golferName || !stake || !toWin) return;
+      if (parseFloat(toWin) <= parseFloat(stake)) {
+        alert("To win should be more than the stake — it's the total payout, stake included.");
+        return;
+      }
+    } else {
+      odds = document.getElementById("betOdds").value.trim();
+      if (!golferName || !odds || !stake) return;
+      if (!americanPayout(odds, stake)) {
+        alert("Odds should look like +1500 or -110.");
+        return;
+      }
     }
 
     const golfer = lb ? lb.competitors.find((c) => c.name.toLowerCase() === golferName.toLowerCase()) : null;
@@ -844,6 +893,7 @@
       custom,
       odds,
       stake,
+      toWin,
       notes,
     };
     state.bets.push(bet);
@@ -1047,9 +1097,17 @@
     if (!parlay) newLegsContainer.appendChild(createLegBuilderRow(2));
 
     if (parlay) {
-      document.getElementById("parlayOdds").value = parlay.odds;
       document.getElementById("parlayStake").value = parlay.stake;
       document.getElementById("parlayNotes").value = parlay.notes || "";
+      if (parlay.toWin) {
+        setToggleMode("parlayModeToggle", "parlayOddsField", "parlayToWinField", "payout");
+        document.getElementById("parlayToWin").value = parlay.toWin;
+      } else {
+        setToggleMode("parlayModeToggle", "parlayOddsField", "parlayToWinField", "odds");
+        document.getElementById("parlayOdds").value = parlay.odds;
+      }
+    } else {
+      setToggleMode("parlayModeToggle", "parlayOddsField", "parlayToWinField", "odds");
     }
 
     document.getElementById("parlaySheet").showModal();
@@ -1111,13 +1169,25 @@
       return;
     }
 
-    const odds = document.getElementById("parlayOdds").value.trim();
     const stake = document.getElementById("parlayStake").value;
     const notes = document.getElementById("parlayNotes").value.trim();
-    if (!odds || !stake) return;
-    if (!americanPayout(odds, stake)) {
-      alert("Odds should look like +1500 or -110.");
-      return;
+
+    let odds = "";
+    let toWin = "";
+    if (getToggleMode("parlayModeToggle") === "payout") {
+      toWin = document.getElementById("parlayToWin").value;
+      if (!stake || !toWin) return;
+      if (parseFloat(toWin) <= parseFloat(stake)) {
+        alert("To win should be more than the stake — it's the total payout, stake included.");
+        return;
+      }
+    } else {
+      odds = document.getElementById("parlayOdds").value.trim();
+      if (!odds || !stake) return;
+      if (!americanPayout(odds, stake)) {
+        alert("Odds should look like +1500 or -110.");
+        return;
+      }
     }
 
     // everything validated — commit
@@ -1135,6 +1205,7 @@
         parlay.legIds = keptLegIds.concat(addedLegIds);
         parlay.odds = odds;
         parlay.stake = stake;
+        parlay.toWin = toWin;
         parlay.notes = notes;
         addedLegIds.forEach((betId) => {
           const bet = state.bets.find((b) => b.id === betId);
@@ -1148,6 +1219,7 @@
         legIds,
         odds,
         stake,
+        toWin,
         notes,
       };
       state.parlays.push(parlay);

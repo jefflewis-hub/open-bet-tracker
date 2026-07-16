@@ -588,6 +588,25 @@ button.mark { background: none; padding: 0; cursor: pointer; }
 }
 .field-row { display: flex; gap: 10px; }
 
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  margin-bottom: 12px;
+}
+.mode-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.mode-btn.active { background: var(--accent); color: var(--accent-ink); }
+
 .sheet-actions { display: flex; gap: 10px; margin-top: 6px; }
 .btn-ghost, .btn-primary, .btn-danger {
   flex: 1;
