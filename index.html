@@ -54,7 +54,7 @@
       <p class="empty-title">No bets logged yet</p>
       <p class="empty-sub">Tap the + to mark your first card.</p>
     </div>
-    <button id="combineBtn" class="combine-link" type="button" hidden>+ Combine legs into a parlay</button>
+    <button id="combineBtn" class="combine-link" type="button" hidden>+ New parlay</button>
   </main>
 
   <main id="view-tournaments" class="view" hidden>
@@ -156,8 +156,14 @@
 
     <div class="field">
       <span class="field-label">Legs</span>
-      <div id="parlayLegList" class="leg-checklist"></div>
+      <div id="parlayNewLegs" class="leg-builder-list"></div>
+      <button type="button" id="addLegBtn" class="add-leg-btn">+ Add another leg</button>
       <p id="parlayLegError" class="field-error" hidden>Pick at least 2 legs.</p>
+    </div>
+
+    <div class="field" id="existingLegsField" hidden>
+      <span class="field-label">Or pull in bets you already logged</span>
+      <div id="parlayLegList" class="leg-checklist"></div>
     </div>
 
     <div class="field-row">

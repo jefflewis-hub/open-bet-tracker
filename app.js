@@ -447,8 +447,7 @@
 
   function updateCombineButton() {
     const btn = document.getElementById("combineBtn");
-    const eligible = state.bets.filter((b) => !b.parlayId);
-    btn.hidden = eligible.length < 2;
+    btn.hidden = state.tournaments.length === 0;
   }
 
   function renderBetRow(bet, lb) {
@@ -676,18 +675,18 @@
     document.getElementById("addBetSheet").showModal();
   }
 
-  function populateGolferOptions(tournamentId) {
-    const dl = document.getElementById("golferOptions");
+  // populates a <datalist> with a tournament's field; if the leaderboard hasn't loaded
+  // yet, fetches it and populates once it arrives (only if selEl, when given, still
+  // points at that same tournament — guards against a stale in-flight fetch clobbering
+  // a datalist after the user switched tournaments)
+  function populateDatalist(dl, tournamentId, selEl) {
     const lb = leaderboards[tournamentId];
     if (!lb) {
       dl.innerHTML = "";
-      // leaderboard hasn't loaded yet — fetch it now and populate once it arrives,
-      // as long as the tournament selector still points at this tournament
       fetchLeaderboard(tournamentId)
         .then((fetchedLb) => {
           leaderboards[tournamentId] = fetchedLb;
-          const sel = document.getElementById("betTournament");
-          if (sel && sel.value === tournamentId) populateGolferOptions(tournamentId);
+          if (!selEl || selEl.value === tournamentId) populateDatalist(dl, tournamentId, selEl);
           render();
         })
         .catch(() => {});
@@ -702,6 +701,10 @@
         opt.value = c.name;
         dl.appendChild(opt);
       });
+  }
+
+  function populateGolferOptions(tournamentId) {
+    populateDatalist(document.getElementById("golferOptions"), tournamentId, document.getElementById("betTournament"));
   }
 
   document.getElementById("betType").addEventListener("change", toggleTypeFields);
@@ -800,11 +803,96 @@
   /* ---------- parlay sheet ---------- */
   document.getElementById("combineBtn").addEventListener("click", () => openParlaySheet());
   document.getElementById("cancelParlayBtn").addEventListener("click", () => document.getElementById("parlaySheet").close());
+  document.getElementById("addLegBtn").addEventListener("click", () => addLegRow());
+
+  let legBuilderSeq = 0;
+
+  function createLegBuilderRow(labelIndex) {
+    legBuilderSeq += 1;
+    const dlId = "legGolferOptions" + legBuilderSeq;
+    const row = document.createElement("div");
+    row.className = "leg-builder-row";
+    row.innerHTML = `
+      <div class="leg-builder-head">
+        <span class="leg-builder-num">Leg ${labelIndex}</span>
+        <button type="button" class="leg-remove-btn" aria-label="Remove leg">×</button>
+      </div>
+      <label class="field">
+        <span class="field-label">Tournament</span>
+        <select class="leg-tournament"></select>
+      </label>
+      <label class="field">
+        <span class="field-label">Golfer</span>
+        <input type="text" class="leg-golfer" list="${dlId}" autocapitalize="words" autocomplete="off" placeholder="Start typing a name…">
+        <datalist id="${dlId}"></datalist>
+      </label>
+      <label class="field">
+        <span class="field-label">Bet type</span>
+        <select class="leg-type">
+          <option value="outright">Outright winner</option>
+          <option value="top5">Top 5</option>
+          <option value="top10">Top 10</option>
+          <option value="top20">Top 20</option>
+          <option value="top30">Top 30</option>
+          <option value="makecut">Makes the cut</option>
+          <option value="h2h">Head-to-head</option>
+          <option value="custom">Other / prop</option>
+        </select>
+      </label>
+      <label class="field leg-opponent-field" hidden>
+        <span class="field-label">Versus</span>
+        <input type="text" class="leg-opponent" list="${dlId}" autocapitalize="words" autocomplete="off" placeholder="Opposing golfer…">
+      </label>
+      <label class="field leg-custom-field" hidden>
+        <span class="field-label">What's the bet?</span>
+        <input type="text" class="leg-custom" maxlength="80" placeholder="e.g. top American finisher">
+      </label>
+    `;
+
+    const tSel = row.querySelector(".leg-tournament");
+    tSel.innerHTML = state.tournaments.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+    tSel.value = activeTournamentId || (state.tournaments[0] ? state.tournaments[0].id : "");
+
+    const dl = row.querySelector("datalist");
+    populateDatalist(dl, tSel.value, tSel);
+    tSel.addEventListener("change", () => populateDatalist(dl, tSel.value, tSel));
+
+    const typeSel = row.querySelector(".leg-type");
+    const oppField = row.querySelector(".leg-opponent-field");
+    const customField = row.querySelector(".leg-custom-field");
+    typeSel.addEventListener("change", () => {
+      oppField.hidden = typeSel.value !== "h2h";
+      customField.hidden = typeSel.value !== "custom";
+    });
+
+    row.querySelector(".leg-remove-btn").addEventListener("click", () => {
+      row.remove();
+      renumberLegRows();
+    });
+
+    return row;
+  }
+
+  function renumberLegRows() {
+    document.querySelectorAll("#parlayNewLegs .leg-builder-row").forEach((row, i) => {
+      row.querySelector(".leg-builder-num").textContent = "Leg " + (i + 1);
+    });
+  }
+
+  function addLegRow() {
+    const container = document.getElementById("parlayNewLegs");
+    container.appendChild(createLegBuilderRow(container.children.length + 1));
+  }
 
   function openParlaySheet() {
+    document.getElementById("parlayForm").reset();
+    document.getElementById("parlayLegError").hidden = true;
+
     const eligible = state.bets.filter((b) => !b.parlayId);
+    const existingField = document.getElementById("existingLegsField");
     const list = document.getElementById("parlayLegList");
     list.innerHTML = "";
+    existingField.hidden = eligible.length === 0;
     eligible.forEach((bet) => {
       const t = state.tournaments.find((x) => x.id === bet.tournamentId);
       const typeLabel =
@@ -820,20 +908,70 @@
       `;
       list.appendChild(row);
     });
-    document.getElementById("parlayForm").reset();
-    document.getElementById("parlayLegError").hidden = true;
+
+    const newLegsContainer = document.getElementById("parlayNewLegs");
+    newLegsContainer.innerHTML = "";
+    newLegsContainer.appendChild(createLegBuilderRow(1));
+    newLegsContainer.appendChild(createLegBuilderRow(2));
+
     document.getElementById("parlaySheet").showModal();
   }
 
   document.getElementById("parlayForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    const checked = Array.from(document.querySelectorAll('#parlayLegList input[type="checkbox"]:checked')).map((el) => el.value);
     const errEl = document.getElementById("parlayLegError");
-    if (checked.length < 2) {
+    errEl.hidden = true;
+
+    const checkedExisting = Array.from(document.querySelectorAll('#parlayLegList input[type="checkbox"]:checked')).map((el) => el.value);
+
+    // validate every filled-in new-leg row before committing anything to state
+    const newLegBets = [];
+    const rows = document.querySelectorAll("#parlayNewLegs .leg-builder-row");
+    for (const row of rows) {
+      const golferName = row.querySelector(".leg-golfer").value.trim();
+      if (!golferName) continue; // unused row, skip silently
+
+      const tournamentId = row.querySelector(".leg-tournament").value;
+      const type = row.querySelector(".leg-type").value;
+      const oppName = row.querySelector(".leg-opponent").value.trim();
+      const custom = row.querySelector(".leg-custom").value.trim();
+
+      if (type === "h2h" && !oppName) {
+        alert(`Add an opponent for the head-to-head leg on ${golferName}.`);
+        return;
+      }
+      if (type === "custom" && !custom) {
+        alert(`Describe the prop bet for ${golferName}.`);
+        return;
+      }
+
+      const lb = leaderboards[tournamentId];
+      const golfer = lb ? lb.competitors.find((c) => c.name.toLowerCase() === golferName.toLowerCase()) : null;
+      let opponent = null;
+      if (type === "h2h") {
+        opponent = lb ? lb.competitors.find((c) => c.name.toLowerCase() === oppName.toLowerCase()) : null;
+      }
+
+      newLegBets.push({
+        id: String(Date.now()) + Math.random().toString(36).slice(2, 7),
+        tournamentId,
+        golferId: golfer ? golfer.id : golferName,
+        golferName: golfer ? golfer.name : golferName,
+        type,
+        opponentId: opponent ? opponent.id : oppName || null,
+        opponentName: opponent ? opponent.name : oppName || null,
+        custom,
+        odds: "",
+        stake: "",
+        notes: "",
+      });
+    }
+
+    if (checkedExisting.length + newLegBets.length < 2) {
       errEl.hidden = false;
       return;
     }
-    errEl.hidden = true;
+
     const odds = document.getElementById("parlayOdds").value.trim();
     const stake = document.getElementById("parlayStake").value;
     const notes = document.getElementById("parlayNotes").value.trim();
@@ -843,15 +981,19 @@
       return;
     }
 
+    // everything validated — commit
+    newLegBets.forEach((b) => state.bets.push(b));
+    const legIds = checkedExisting.concat(newLegBets.map((b) => b.id));
+
     const parlay = {
       id: "p" + String(Date.now()) + Math.random().toString(36).slice(2, 7),
-      legIds: checked,
+      legIds,
       odds,
       stake,
       notes,
     };
     state.parlays.push(parlay);
-    checked.forEach((betId) => {
+    legIds.forEach((betId) => {
       const bet = state.bets.find((b) => b.id === betId);
       if (bet) bet.parlayId = parlay.id;
     });
