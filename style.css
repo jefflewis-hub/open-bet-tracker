@@ -352,6 +352,16 @@ button.mark { background: none; padding: 0; cursor: pointer; }
   font-size: 0.76rem;
   color: var(--ink-soft);
 }
+.leg-edit-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 2px 0;
+}
 .leg-dot {
   width: 8px;
   height: 8px;
@@ -398,7 +408,7 @@ button.mark { background: none; padding: 0; cursor: pointer; }
   height: 18px;
   accent-color: var(--accent);
 }
-.leg-check-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.leg-check-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .leg-check-golfer { font-weight: 500; }
 .leg-check-meta { font-size: 0.72rem; color: var(--ink-soft); }
 

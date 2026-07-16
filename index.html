@@ -153,10 +153,15 @@
 <dialog id="parlaySheet" class="sheet">
   <form id="parlayForm" method="dialog">
     <div class="sheet-handle"></div>
-    <h2 class="sheet-title">New parlay</h2>
+    <h2 class="sheet-title" id="parlaySheetTitle">New parlay</h2>
+
+    <div class="field" id="currentLegsField" hidden>
+      <span class="field-label">Already in this parlay</span>
+      <div id="parlayCurrentLegs" class="leg-checklist"></div>
+    </div>
 
     <div class="field">
-      <span class="field-label">Legs</span>
+      <span class="field-label" id="newLegsLabel">Legs</span>
       <div id="parlayNewLegs" class="leg-builder-list"></div>
       <button type="button" id="addLegBtn" class="add-leg-btn">+ Add another leg</button>
       <p id="parlayLegError" class="field-error" hidden>Pick at least 2 legs.</p>

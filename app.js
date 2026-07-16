@@ -25,6 +25,7 @@
   let pollTimer = null;
   let lastUpdated = null;
   let pendingRemove = null; // {type:'bet'|'tournament'|'parlay'|'otherBet', id}
+  let editingParlayId = null; // set while the parlay sheet is open in edit mode, else null
 
   function loadState() {
     try {
@@ -520,6 +521,12 @@
       `;
       legsEl.appendChild(row);
     });
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "leg-edit-btn";
+    editBtn.textContent = "+ Add / edit legs";
+    editBtn.addEventListener("click", () => openParlaySheet(parlay.id));
+    legsEl.appendChild(editBtn);
     card.appendChild(legsEl);
 
     return card;
@@ -548,10 +555,13 @@
     const main = document.createElement("div");
     main.className = "bet-main";
     const typeLabel = bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+    const metaText = bet.odds
+      ? `${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}`
+      : "No odds set — was built as a parlay leg";
     main.innerHTML = `
       <div class="bet-golfer">${escapeHtml(bet.golferName)}</div>
       <div class="bet-type">${typeLabel}</div>
-      <div class="bet-meta">${escapeHtml(bet.odds)} · ${fmtMoney(parseFloat(bet.stake) || 0)}${payout ? " to win " + fmtMoney(payout.toReturn) : ""}</div>
+      <div class="bet-meta">${metaText}</div>
     `;
     row.appendChild(main);
 
@@ -883,7 +893,10 @@
 
   /* ---------- parlay sheet ---------- */
   document.getElementById("combineBtn").addEventListener("click", () => openParlaySheet());
-  document.getElementById("cancelParlayBtn").addEventListener("click", () => document.getElementById("parlaySheet").close());
+  document.getElementById("cancelParlayBtn").addEventListener("click", () => {
+    editingParlayId = null;
+    document.getElementById("parlaySheet").close();
+  });
   document.getElementById("addLegBtn").addEventListener("click", () => addLegRow());
 
   let legBuilderSeq = 0;
@@ -965,9 +978,49 @@
     container.appendChild(createLegBuilderRow(container.children.length + 1));
   }
 
-  function openParlaySheet() {
+  function legTypeLabel(bet) {
+    return bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+  }
+
+  function openParlaySheet(parlayId) {
+    editingParlayId = parlayId || null;
+    const parlay = editingParlayId ? state.parlays.find((p) => p.id === editingParlayId) : null;
+
     document.getElementById("parlayForm").reset();
     document.getElementById("parlayLegError").hidden = true;
+    document.getElementById("parlaySheetTitle").textContent = parlay ? "Edit parlay" : "New parlay";
+    document.getElementById("newLegsLabel").textContent = parlay ? "Add more legs" : "Legs";
+
+    const currentField = document.getElementById("currentLegsField");
+    const currentList = document.getElementById("parlayCurrentLegs");
+    currentList.innerHTML = "";
+    if (parlay) {
+      currentField.hidden = false;
+      parlay.legIds.forEach((legId) => {
+        const bet = state.bets.find((b) => b.id === legId);
+        if (!bet) return;
+        const t = state.tournaments.find((x) => x.id === bet.tournamentId);
+        const row = document.createElement("div");
+        row.className = "leg-check-row";
+        row.dataset.betId = bet.id;
+        row.innerHTML = `
+          <span class="leg-check-main">
+            <span class="leg-check-golfer">${escapeHtml(bet.golferName)}</span>
+            <span class="leg-check-meta">${legTypeLabel(bet)} · ${escapeHtml(t ? t.name : "")}</span>
+          </span>
+        `;
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "leg-remove-btn";
+        removeBtn.setAttribute("aria-label", "Drop this leg from the parlay");
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", () => row.remove());
+        row.appendChild(removeBtn);
+        currentList.appendChild(row);
+      });
+    } else {
+      currentField.hidden = true;
+    }
 
     const eligible = state.bets.filter((b) => !b.parlayId);
     const existingField = document.getElementById("existingLegsField");
@@ -976,15 +1029,13 @@
     existingField.hidden = eligible.length === 0;
     eligible.forEach((bet) => {
       const t = state.tournaments.find((x) => x.id === bet.tournamentId);
-      const typeLabel =
-        bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
       const row = document.createElement("label");
       row.className = "leg-check-row";
       row.innerHTML = `
         <input type="checkbox" value="${escapeHtml(bet.id)}">
         <span class="leg-check-main">
           <span class="leg-check-golfer">${escapeHtml(bet.golferName)}</span>
-          <span class="leg-check-meta">${typeLabel} · ${escapeHtml(t ? t.name : "")} · ${escapeHtml(bet.odds)}</span>
+          <span class="leg-check-meta">${legTypeLabel(bet)} · ${escapeHtml(t ? t.name : "")}${bet.odds ? " · " + escapeHtml(bet.odds) : ""}</span>
         </span>
       `;
       list.appendChild(row);
@@ -993,7 +1044,13 @@
     const newLegsContainer = document.getElementById("parlayNewLegs");
     newLegsContainer.innerHTML = "";
     newLegsContainer.appendChild(createLegBuilderRow(1));
-    newLegsContainer.appendChild(createLegBuilderRow(2));
+    if (!parlay) newLegsContainer.appendChild(createLegBuilderRow(2));
+
+    if (parlay) {
+      document.getElementById("parlayOdds").value = parlay.odds;
+      document.getElementById("parlayStake").value = parlay.stake;
+      document.getElementById("parlayNotes").value = parlay.notes || "";
+    }
 
     document.getElementById("parlaySheet").showModal();
   }
@@ -1003,6 +1060,7 @@
     const errEl = document.getElementById("parlayLegError");
     errEl.hidden = true;
 
+    const keptLegIds = Array.from(document.querySelectorAll("#parlayCurrentLegs .leg-check-row")).map((row) => row.dataset.betId);
     const checkedExisting = Array.from(document.querySelectorAll('#parlayLegList input[type="checkbox"]:checked')).map((el) => el.value);
 
     // validate every filled-in new-leg row before committing anything to state
@@ -1048,7 +1106,7 @@
       });
     }
 
-    if (checkedExisting.length + newLegBets.length < 2) {
+    if (keptLegIds.length + checkedExisting.length + newLegBets.length < 2) {
       errEl.hidden = false;
       return;
     }
@@ -1064,20 +1122,42 @@
 
     // everything validated — commit
     newLegBets.forEach((b) => state.bets.push(b));
-    const legIds = checkedExisting.concat(newLegBets.map((b) => b.id));
+    const addedLegIds = checkedExisting.concat(newLegBets.map((b) => b.id));
 
-    const parlay = {
-      id: "p" + String(Date.now()) + Math.random().toString(36).slice(2, 7),
-      legIds,
-      odds,
-      stake,
-      notes,
-    };
-    state.parlays.push(parlay);
-    legIds.forEach((betId) => {
-      const bet = state.bets.find((b) => b.id === betId);
-      if (bet) bet.parlayId = parlay.id;
-    });
+    if (editingParlayId) {
+      const parlay = state.parlays.find((p) => p.id === editingParlayId);
+      if (parlay) {
+        const droppedLegIds = parlay.legIds.filter((id) => !keptLegIds.includes(id));
+        droppedLegIds.forEach((id) => {
+          const bet = state.bets.find((b) => b.id === id);
+          if (bet) delete bet.parlayId;
+        });
+        parlay.legIds = keptLegIds.concat(addedLegIds);
+        parlay.odds = odds;
+        parlay.stake = stake;
+        parlay.notes = notes;
+        addedLegIds.forEach((betId) => {
+          const bet = state.bets.find((b) => b.id === betId);
+          if (bet) bet.parlayId = parlay.id;
+        });
+      }
+    } else {
+      const legIds = addedLegIds;
+      const parlay = {
+        id: "p" + String(Date.now()) + Math.random().toString(36).slice(2, 7),
+        legIds,
+        odds,
+        stake,
+        notes,
+      };
+      state.parlays.push(parlay);
+      legIds.forEach((betId) => {
+        const bet = state.bets.find((b) => b.id === betId);
+        if (bet) bet.parlayId = parlay.id;
+      });
+    }
+
+    editingParlayId = null;
     saveState();
     document.getElementById("parlaySheet").close();
     render();
