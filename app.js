@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "circleSquare.v1";
-  const REFRESH_MS = 45000;
+  const REFRESH_MS = 20000;
   const ESPN_LEADERBOARD = "https://site.api.espn.com/apis/site/v2/sports/golf/leaderboard";
   const ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard";
 
@@ -68,6 +68,9 @@
     const posNum = numMatch ? parseInt(numMatch[1], 10) : null;
     const scoreToParStat = ((c.statistics || []).find((s) => s.name === "scoreToPar")) || null;
     const scoreToPar = scoreToParStat && typeof scoreToParStat.value === "number" ? scoreToParStat.value : null;
+    // ESPN's top-level score.displayValue lags/sticks at "E" during live play; the
+    // scoreToPar statistic tracks correctly, so prefer it and only fall back otherwise
+    const scoreDisplay = (scoreToParStat && scoreToParStat.displayValue) || (c.score && c.score.displayValue) || "-";
     return {
       id: c.athlete ? c.athlete.id : c.id,
       name: c.athlete ? c.athlete.displayName : "Unknown",
@@ -77,7 +80,7 @@
       isWD,
       isDQ,
       scoreToPar,
-      scoreDisplay: (c.score && c.score.displayValue) || "-",
+      scoreDisplay,
       thru: c.status ? c.status.thru : null,
       teeTime: c.status ? c.status.teeTime : null,
     };
