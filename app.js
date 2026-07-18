@@ -376,6 +376,15 @@
     }
     empty.hidden = true;
 
+    const golferGroups = computeGolferGroups();
+    if (golferGroups.length > 0) {
+      const title = document.createElement("div");
+      title.className = "tournament-group-title";
+      title.textContent = "Multiple Bets";
+      list.appendChild(title);
+      golferGroups.forEach((g) => list.appendChild(renderGolferExposureCard(g)));
+    }
+
     if (state.parlays.length > 0) {
       const title = document.createElement("div");
       title.className = "tournament-group-title";
@@ -551,6 +560,87 @@
     editBtn.textContent = "+ Add / edit legs";
     editBtn.addEventListener("click", () => openParlaySheet(parlay.id));
     legsEl.appendChild(editBtn);
+    card.appendChild(legsEl);
+
+    return card;
+  }
+
+  // groups every bet (standalone and parlay legs alike) by golfer within a tournament,
+  // keeping only golfers with 2+ bets riding on them
+  function computeGolferGroups() {
+    const map = new Map();
+    state.bets.forEach((bet) => {
+      if (!bet.golferId || !bet.tournamentId) return;
+      const key = bet.golferId + "|" + bet.tournamentId;
+      if (!map.has(key)) map.set(key, { golferId: bet.golferId, tournamentId: bet.tournamentId, golferName: bet.golferName, entries: [] });
+      map.get(key).entries.push(bet);
+    });
+    return Array.from(map.values()).filter((g) => g.entries.length >= 2);
+  }
+
+  function renderGolferExposureCard(group) {
+    const card = document.createElement("div");
+    card.className = "parlay-card";
+
+    const header = document.createElement("div");
+    header.className = "bet-row";
+
+    const markEl = document.createElement("div");
+    markEl.className = "mark mark-dash";
+    markEl.textContent = markGlyph("dash");
+    header.appendChild(markEl);
+
+    const standaloneEntries = group.entries.filter((e) => !e.parlayId);
+    const parlayLegEntries = group.entries.filter((e) => e.parlayId);
+    const standaloneStake = standaloneEntries.reduce((sum, e) => sum + (parseFloat(e.stake) || 0), 0);
+    const t = state.tournaments.find((x) => x.id === group.tournamentId);
+
+    let metaText;
+    if (standaloneEntries.length > 0 && parlayLegEntries.length > 0) {
+      metaText = `${fmtMoney(standaloneStake)} staked standalone · also a leg in ${parlayLegEntries.length} parlay${parlayLegEntries.length === 1 ? "" : "s"}`;
+    } else if (standaloneEntries.length > 0) {
+      metaText = `${fmtMoney(standaloneStake)} across ${standaloneEntries.length} bets`;
+    } else {
+      metaText = `Legs in ${parlayLegEntries.length} parlays`;
+    }
+
+    const main = document.createElement("div");
+    main.className = "bet-main";
+    main.innerHTML = `
+      <div class="bet-golfer">${escapeHtml(group.golferName)}</div>
+      <div class="bet-type">${group.entries.length} bets · ${escapeHtml(t ? t.name : "")}</div>
+      <div class="bet-meta">${metaText}</div>
+    `;
+    header.appendChild(main);
+
+    const lb = leaderboards[group.tournamentId];
+    const golfer = lb ? lb.byId.get(String(group.golferId)) : null;
+    const scoreEl = document.createElement("div");
+    scoreEl.className = "bet-score";
+    scoreEl.innerHTML = golfer
+      ? `<div class="bet-pos">${escapeHtml(golfer.posDisplay)}</div><div class="bet-topar">${escapeHtml(golfer.scoreDisplay)}</div>`
+      : "";
+    header.appendChild(scoreEl);
+
+    card.appendChild(header);
+
+    const legsEl = document.createElement("div");
+    legsEl.className = "parlay-legs";
+    group.entries.forEach((bet) => {
+      const lbForBet = leaderboards[bet.tournamentId];
+      const ev = evaluateBet(bet, lbForBet);
+      const row = document.createElement("div");
+      row.className = "parlay-leg-row";
+      const typeLabel =
+        bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+      const context = bet.parlayId ? " (parlay leg)" : "";
+      row.innerHTML = `
+        <span class="leg-dot leg-${ev.state}"></span>
+        <span class="leg-name">${typeLabel}${context}</span>
+        <span class="leg-pos">${escapeHtml(ev.posText)}</span>
+      `;
+      legsEl.appendChild(row);
+    });
     card.appendChild(legsEl);
 
     return card;
