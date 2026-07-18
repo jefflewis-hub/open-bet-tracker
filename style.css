@@ -503,6 +503,20 @@ button.mark { background: none; padding: 0; cursor: pointer; }
 }
 .field-error { color: var(--critical); font-size: 0.78rem; padding: 0 18px 8px; }
 
+.transfer-hint { color: var(--ink-soft); font-size: 0.8rem; padding: 0 18px 10px; }
+.transfer-btn {
+  display: block;
+  width: calc(100% - 36px);
+  margin: 0 18px 18px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: var(--radius-s);
+  padding: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 /* ---------- tabbar ---------- */
 .tabbar {
   position: fixed;

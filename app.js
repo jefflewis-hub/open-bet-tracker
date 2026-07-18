@@ -1374,7 +1374,61 @@
     if (!document.hidden) refreshAll();
   });
 
+  /* ---------- transfer to another device ---------- */
+  function buildTransferUrl() {
+    const payload = JSON.stringify({ tournaments: state.tournaments, bets: state.bets, parlays: state.parlays, otherBets: state.otherBets });
+    const encoded = btoa(unescape(encodeURIComponent(payload)));
+    return `${location.origin}${location.pathname}#data=${encoded}`;
+  }
+
+  document.getElementById("exportLinkBtn").addEventListener("click", () => {
+    const url = buildTransferUrl();
+    const btn = document.getElementById("exportLinkBtn");
+    const original = btn.textContent;
+    const flash = (text) => {
+      btn.textContent = text;
+      setTimeout(() => {
+        btn.textContent = original;
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(url)
+        .then(() => flash("Copied!"))
+        .catch(() => window.prompt("Copy this link:", url));
+    } else {
+      window.prompt("Copy this link:", url);
+    }
+  });
+
+  // if this page was opened via a transfer link (#data=...), offer to import it
+  // before anything else renders, then strip the hash either way
+  function checkForImport() {
+    if (!location.hash.startsWith("#data=")) return;
+    const encoded = location.hash.slice(6);
+    history.replaceState(null, "", location.pathname);
+    let imported;
+    try {
+      imported = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    } catch (e) {
+      alert("Couldn't read that transfer link.");
+      return;
+    }
+    const count = (imported.bets || []).length + (imported.otherBets || []).length;
+    const proceed = confirm(`Import ${count} bet${count === 1 ? "" : "s"} from this link? This replaces everything currently on this device.`);
+    if (!proceed) return;
+    state = {
+      tournaments: imported.tournaments || [],
+      bets: imported.bets || [],
+      parlays: imported.parlays || [],
+      otherBets: imported.otherBets || [],
+    };
+    leaderboards = {};
+    saveState();
+  }
+
   /* ---------- boot ---------- */
+  checkForImport();
   render();
   refreshAll();
   startPolling();
