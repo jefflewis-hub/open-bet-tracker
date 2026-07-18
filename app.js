@@ -626,24 +626,71 @@
 
     const legsEl = document.createElement("div");
     legsEl.className = "parlay-legs";
-    group.entries.forEach((bet) => {
+
+    // only standalone bets get combined when they share the same structure (type, and
+    // opponent/prop text where relevant) — a parlay leg has no payout of its own to add in,
+    // so it always renders as its own row
+    const structureGroups = new Map();
+    standaloneEntries.forEach((bet) => {
+      const key = betStructureKey(bet);
+      if (!structureGroups.has(key)) structureGroups.set(key, []);
+      structureGroups.get(key).push(bet);
+    });
+
+    const typeLabelFor = (bet) =>
+      bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
+
+    structureGroups.forEach((bets) => {
+      const lbForGroup = leaderboards[group.tournamentId];
+      const ev = evaluateBet(bets[0], lbForGroup); // identical golfer+structure grades identically for every bet in the group
+      const row = document.createElement("div");
+      row.className = "parlay-leg-row";
+      if (bets.length >= 2) {
+        const combinedStake = bets.reduce((sum, b) => sum + (parseFloat(b.stake) || 0), 0);
+        const combinedToWin = bets.reduce((sum, b) => {
+          const p = getPayout(b);
+          return sum + (p ? p.toReturn : 0);
+        }, 0);
+        row.innerHTML = `
+          <span class="leg-dot leg-${ev.state}"></span>
+          <span class="leg-name">${typeLabelFor(bets[0])} ×${bets.length} — ${fmtMoney(combinedStake)} to win ${fmtMoney(combinedToWin)}</span>
+          <span class="leg-pos">${escapeHtml(ev.posText)}</span>
+        `;
+      } else {
+        const bet = bets[0];
+        const payout = getPayout(bet);
+        const winText = payout ? ` — ${fmtMoney(parseFloat(bet.stake) || 0)} to win ${fmtMoney(payout.toReturn)}` : "";
+        row.innerHTML = `
+          <span class="leg-dot leg-${ev.state}"></span>
+          <span class="leg-name">${typeLabelFor(bet)}${winText}</span>
+          <span class="leg-pos">${escapeHtml(ev.posText)}</span>
+        `;
+      }
+      legsEl.appendChild(row);
+    });
+
+    parlayLegEntries.forEach((bet) => {
       const lbForBet = leaderboards[bet.tournamentId];
       const ev = evaluateBet(bet, lbForBet);
       const row = document.createElement("div");
       row.className = "parlay-leg-row";
-      const typeLabel =
-        bet.type === "h2h" ? `H2H vs ${escapeHtml(bet.opponentName || "?")}` : bet.type === "custom" ? escapeHtml(bet.custom || "Prop") : BET_TYPE_LABELS[bet.type];
-      const context = bet.parlayId ? " (parlay leg)" : "";
       row.innerHTML = `
         <span class="leg-dot leg-${ev.state}"></span>
-        <span class="leg-name">${typeLabel}${context}</span>
+        <span class="leg-name">${typeLabelFor(bet)} (parlay leg)</span>
         <span class="leg-pos">${escapeHtml(ev.posText)}</span>
       `;
       legsEl.appendChild(row);
     });
+
     card.appendChild(legsEl);
 
     return card;
+  }
+
+  function betStructureKey(bet) {
+    if (bet.type === "h2h") return `h2h|${bet.opponentId}`;
+    if (bet.type === "custom") return `custom|${(bet.custom || "").trim().toLowerCase()}`;
+    return bet.type;
   }
 
   function updateCombineButton() {
